@@ -1,0 +1,9 @@
+[Desktop Entry]
+Encoding=UTF-8
+Name=MCP Remote
+Comment=On-screen remote to control a MythTV frontend
+Icon=video-x-generic
+Exec=/usr/bin/mcpremote
+Terminal=false
+Type=Application
+Categories=GTK;Utility;AudioVideo;Audio;Video;

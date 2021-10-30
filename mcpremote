@@ -1,0 +1,201 @@
+#! /usr/bin/python3
+# -*- coding: utf-8 -*-
+#
+# MCP Remote is an on-screen remote that uses the network to control a MythTV
+# frontend.  MCP Remote can be installed and configured using Mythbuntu Control 
+# Panel.
+#
+# Copyright (C) 2021, Ted L (MythTV Forum member heyted)
+#
+# This is free software; you can redistribute it and/or modify it under
+# the terms of the GNU General Public License as published by the Free
+# Software Foundation; either version 3 of the License, or any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License along
+# with this application. If not, see <http://www.gnu.org/licenses/>.
+##################################################################################
+
+import os
+import requests, configparser, argparse
+import xml.etree.ElementTree as elmtree
+import gi
+gi.require_version("Gtk", "3.0")
+from gi.repository import Gtk
+
+class mcprclass():
+    def __init__(self, fe_status, fe_ips, buttons_keys):
+        self.builder = Gtk.Builder()
+        self.builder.add_from_file("./mcpremote.ui")
+
+        #make widgets referencable from top level:
+        for widget in self.builder.get_objects():
+            if not isinstance(widget, Gtk.Widget):
+                continue
+            widget.set_name(Gtk.Buildable.get_name(widget))
+            setattr(self, widget.get_name(), widget)
+
+        self.builder.connect_signals(self)
+        self.window = self.builder.get_object("mcpremote_window")
+        self.first_fe_box_fill = True
+        self.fe_index = 0
+        for item in fe_ips:
+            self.builder.get_object('frontend_list_box').append_text(item[0])
+        self.frontend_list_box.set_active(0)
+        self.fe_status = fe_status
+        if fe_status:
+            self.f_end_status.set_text(fe_status)
+        else:
+            self.f_end_status.set_text('Unable to connect')
+        self.window.show_all()
+        Gtk.main()
+
+    def onDestroy(self, *args):
+        Gtk.main_quit()
+
+    def send_key(self, button):
+        button = Gtk.Buildable.get_name(button)
+        key = buttons_keys[1][buttons_keys[0].index(button)]
+        if self.fe_status:
+            url = 'http://' + fe_ips[self.fe_index][1] + ':6547/Frontend/SendKey?Key=' + key
+            result = requests.post(url).text
+            if not 'true' in result:
+                self.f_end_status.set_text('Unable to receive key')
+        else:
+            self.f_end_status.set_text('Unable to receive key')
+
+    def refresh(self, button):
+        if isbadipv4(fe_ips[self.fe_index][1]):
+            fe_status = False
+        else:
+            fe_status = get_status(fe_ips[self.fe_index][1])
+        if fe_status:
+            self.f_end_status.set_text(fe_status)
+        else:
+            self.f_end_status.set_text('Unable to connect')
+
+    def change_fe(self, button):
+        if self.first_fe_box_fill: #Do not change fe when __init__ fills list box
+            self.first_fe_box_fill = False
+        else:
+            selected_fe = self.frontend_list_box.get_active_text()
+            for i in range(len(fe_ips)):
+                if selected_fe in fe_ips[i]:
+                    self.fe_index = i
+                    self.fe_status = get_status(fe_ips[self.fe_index][1])
+                    if self.fe_status:
+                        self.f_end_status.set_text(self.fe_status)
+                        uhomepath = os.path.expanduser('~')
+                        config.set('mcp_remote_settings', 'last_used_fe', selected_fe)
+                        with open(uhomepath + '/.mythbuntu/mcp_remote.cfg', 'w') as configfile:
+                            config.write(configfile)
+                    else:
+                        self.f_end_status.set_text('Unable to connect')
+
+#Frontend status:
+def get_status(fe_ip):
+    try:
+        tree_string = requests.get('http://' + fe_ip + ':6547/Frontend/GetStatus').text
+    except requests.exceptions.RequestException:
+        tree_string = False
+    state = False
+    if tree_string:
+        root = elmtree.fromstring(tree_string)
+        branch = root.find('State')
+        for i in range(len(branch)):
+            if state:
+                break
+            for j in range(len(branch[i])):
+                if branch[i][j].text == 'state':
+                    state = branch[i][j+1].text
+                    break
+    if state == "idle":
+        state = "Idle"
+    if state == "WatchingPreRecorded":
+        state = "Watching recording"
+    if state == "WatchingLiveTV":
+        state = "Watching live TV"
+    return state
+
+def isbadipv4(s):
+    pieces = s.split('.')
+    if len(pieces) != 4: return True
+    try: return not all(0<=int(p)<256 for p in pieces)
+    except ValueError: return True
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='MythTV Frontend remote control')
+    parser.add_argument('fe_ip', metavar='ip', default='', nargs='?', help='Frontend IP address')
+    args = parser.parse_args()
+    fe_ip = args.fe_ip
+    buttons = ('button_1','button_2','button_3','button_4','button_5','button_6','button_7',
+        'button_8','button_9','button_esc','button_0','button_previous','button_info','button_up',
+        'button_epg','button_left','button_enter','button_right','button_delete','button_down',
+        'button_menu','button_rewind','button_playpause','button_fastforward','button_jumpback',
+        'button_record','button_jumpahead','button_voldown','button_mute','button_volup')
+    uhomepath = os.path.expanduser('~')
+    keys = ('1','2','3','4','5','6','7','8','9','ESCAPE','0','H','I','UP','S','LEFT','ENTER',
+        'RIGHT','D','DOWN','M','<','P','>','PAGEUP','R','PAGEDOWN','{','|','}')
+    be_ip = False
+    if os.path.exists(uhomepath + '/.mythbuntu/mcp_remote.cfg'):
+        config = configparser.RawConfigParser()
+        config.read(uhomepath + '/.mythbuntu/mcp_remote.cfg')
+        be_ip = config.get('mcp_remote_settings', 'be_ip')
+        key_back = config.get('mcp_remote_settings', 'key_back')
+        key_prev_ch = config.get('mcp_remote_settings', 'key_prev_ch')
+        key_info = config.get('mcp_remote_settings', 'key_info')
+        key_guide = config.get('mcp_remote_settings', 'key_guide')
+        key_del = config.get('mcp_remote_settings', 'key_del')
+        key_menu = config.get('mcp_remote_settings', 'key_menu')
+        key_rewind = config.get('mcp_remote_settings', 'key_rewind')
+        key_play_pau = config.get('mcp_remote_settings', 'key_play_pau')
+        key_fst_fwd = config.get('mcp_remote_settings', 'key_fst_fwd')
+        key_jump_bk = config.get('mcp_remote_settings', 'key_jump_bk')
+        key_record = config.get('mcp_remote_settings', 'key_record')
+        key_jump_ahd = config.get('mcp_remote_settings', 'key_jump_ahd')
+        key_vol_dn = config.get('mcp_remote_settings', 'key_vol_dn')
+        key_mute = config.get('mcp_remote_settings', 'key_mute')
+        key_vol_up = config.get('mcp_remote_settings', 'key_vol_up')
+        last_used_fe = config.get('mcp_remote_settings', 'last_used_fe')
+        keys = ('1','2','3','4','5','6','7','8','9',key_back,'0',key_prev_ch,key_info,'UP',
+            key_guide,'LEFT','ENTER','RIGHT',key_del,'DOWN',key_menu,key_rewind,key_play_pau,
+            key_fst_fwd,key_jump_bk,key_record,key_jump_ahd,key_vol_dn,key_mute,key_vol_up)
+    fe_ips = []
+    if fe_ip:
+        if isbadipv4(fe_ip):
+            fe_status = False
+        else:
+            fe_status = get_status(fe_ip)
+            fe_ips = [(fe_ip,fe_ip)]
+    elif be_ip:
+        if isbadipv4(be_ip):
+            fe_status = False
+        else:
+            try:
+                tree_string = requests.get('http://' + be_ip + ':6544/Myth/GetFrontends').text
+                root = elmtree.fromstring(tree_string)
+                branch = root.find('Frontends')
+                for i in range(len(branch)):
+                    fe_ips.append((branch[i][0].text,branch[i][1].text))
+            except requests.exceptions.RequestException:
+                fe_status = False
+        if len(fe_ips) > 0:
+            fe_index = 0
+            if last_used_fe:
+                for fe_index in range(len(fe_ips)):
+                    #Make the latest used frontend first in list:
+                    if last_used_fe in fe_ips[fe_index] and fe_index>0:
+                        fe_ips.append(fe_ips[fe_index])
+                        del fe_ips[fe_index]
+                        fe_ips.reverse()
+            fe_status = get_status(fe_ips[0][1])
+        else:
+            fe_status = False
+    else:
+        fe_status = False
+    buttons_keys = (buttons, keys)
+    mcprclass(fe_status, fe_ips, buttons_keys)
