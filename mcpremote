@@ -30,7 +30,7 @@ from gi.repository import Gtk
 class mcprclass():
     def __init__(self, fe_status, fe_ips, buttons_keys):
         self.builder = Gtk.Builder()
-        self.builder.add_from_file("./mcpremote.ui")
+        self.builder.add_from_file("/usr/share/mcpremote/mcpremote.ui")
 
         #make widgets referencable from top level:
         for widget in self.builder.get_objects():
