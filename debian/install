@@ -1,0 +1,5 @@
+mcpremote usr/bin
+mcpremote.desktop usr/share/applications
+mcpremote.ui usr/share/mcpremote
+plg_mcp_remote.py usr/share/mythbuntu/plugins/python
+tab_mcp_remote.ui usr/share/mythbuntu/plugins/ui
